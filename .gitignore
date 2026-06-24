@@ -1,0 +1,11 @@
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+terraform/build/
+*.zip
+__pycache__/
+*.pyc
+failover_results.csv
+.DS_Store
