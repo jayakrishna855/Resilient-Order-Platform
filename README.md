@@ -1,8 +1,8 @@
 # Resilient Order Platform
 
 A fault-tolerant, distributed order-processing system built on AWS managed
-database services — **Aurora PostgreSQL (Multi-AZ)**, **DynamoDB**, and
-**Redshift Serverless** — deployed entirely via **Terraform**, with an
+database services  **Aurora PostgreSQL (Multi-AZ)**, **DynamoDB**, and
+**Redshift Serverless** deployed entirely via **Terraform**, with an
 automated Aurora failover test used to measure real recovery time rather
 than just assume it.
 
@@ -41,21 +41,6 @@ cite in an interview, e.g.:
 > via an automated load test that triggered a real failover against the
 > live cluster."
 
-## Repo structure
-
-```
-resilient-order-platform/
-├── terraform/              # All infrastructure (VPC, Aurora, DynamoDB, Redshift, Lambda, API GW, CloudWatch)
-├── lambda/
-│   ├── order_api/          # POST /order, GET /order/{id}
-│   └── etl_sync/           # Scheduled Aurora -> Redshift sync
-├── scripts/
-│   ├── failover_test.py    # The key proof artifact - load test + failover trigger + downtime measurement
-│   └── smoke_test.sh       # Basic end-to-end sanity check after deploy
-└── docs/
-    └── ARCHITECTURE.md     # Diagram + consistency tradeoff writeup
-```
-
 ## Deploying
 
 Prerequisites: Terraform >= 1.5, AWS CLI configured with credentials that
@@ -84,58 +69,7 @@ Note the `api_endpoint` output when `apply` finishes.
 This creates an order, fetches it back, and demonstrates idempotent replay
 on a duplicate request.
 
-## Running the failover test
 
-In one terminal, start the load test (it will trigger the failover itself
-20 seconds in, by default):
-
-```bash
-python3 scripts/failover_test.py \
-  --api-url https://<api_endpoint> \
-  --cluster-id $(terraform -chdir=terraform output -raw aurora_cluster_id) \
-  --duration 180 \
-  --trigger-failover
-```
-
-Watch the per-request log for the failure window, then check the summary at
-the end for measured downtime. Open the CloudWatch dashboard (URL in
-`terraform output cloudwatch_dashboard_url`) to see the `Failover` metric and
-replica lag spike at the same timestamp.
-
-## Design decisions worth discussing in an interview
-
-1. **Why RDS Data API instead of a direct Postgres connection from Lambda?**
-   Lambda's concurrency model means a traffic spike can spawn hundreds of
-   concurrent executions, each wanting a DB connection — this exhausts
-   Aurora's connection limit quickly. The Data API is HTTP-based and
-   connectionless, which avoids this entirely (the tradeoff is added
-   per-query latency, acceptable here).
-
-2. **Why DynamoDB for idempotency instead of a unique constraint in Aurora?**
-   Centralizes a high-volume, simple key-value check off the relational
-   database, freeing Aurora's connection/IOPS budget for the order writes
-   themselves. Also naturally expires old keys via TTL.
-
-3. **Why is Redshift sync scheduled rather than real-time CDC?**
-   A 5-minute lag is an explicit, acceptable tradeoff for analytics
-   workloads. The natural production upgrade path is DynamoDB Streams /
-   Aurora zero-ETL integration with Redshift, called out here rather than
-   over-built for a demo.
-
-4. **What's the actual fault-tolerance mechanism being tested?**
-   Aurora Multi-AZ keeps a synchronously replicated reader in a second AZ.
-   On a triggered or real failure, Aurora promotes that reader to writer and
-   updates the cluster endpoint's DNS — client reconnects transparently
-   after a short interruption. The failover test measures exactly how short.
-
-## Known limitations / explicit non-goals (called out, not hidden)
-
-- Single-region only — no Aurora Global Database or DynamoDB Global Tables.
-  This is the natural "what would you do next" answer in an interview.
-- No ElastiCache layer in front of Aurora reads.
-- No authentication on the API (demo-only, not for public deployment with
-  real data).
-- ETL sync uses simple polling, not true CDC.
 
 ## Cleanup
 
